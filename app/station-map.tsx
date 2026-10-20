@@ -108,7 +108,10 @@ export default function StationMap() {
 
     const map = L.map(containerRef.current, {
       preferCanvas: true,
-      scrollWheelZoom: false,
+      // Aktifkan zoom dengan roda/scroll mouse ketika kursor berada di peta.
+      scrollWheelZoom: true,
+      wheelDebounceTime: 60,
+      wheelPxPerZoomLevel: 100,
     }).setView([-2.5, 118], 4);
 
     mapRef.current = map;
@@ -256,7 +259,7 @@ export default function StationMap() {
 
       <div className="map-legend">
         <span>
-          <i className="legend-demo" /> Lokasi dari OpenStreetMap
+          <i className="legend-demo" /> Lokasi dari OpenStreetMap · scroll mouse untuk zoom
         </span>
         <span>
           {mapError ? "Gagal memuat" : loadMessage || `${stationCount} lokasi`}
