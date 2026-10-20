@@ -1,0 +1,10 @@
+{
+  "name": "BBM Siaga",
+  "short_name": "BBM Siaga",
+  "description": "Informasi publik independen tentang BBM dan antrean SPBU",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f5132",
+  "lang": "id"
+}
