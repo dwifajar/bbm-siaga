@@ -19,3 +19,35 @@
 .stationFuelUpdated{font-size:8px;line-height:1.5;color:#86948b;overflow-wrap:anywhere}
 @media(max-width:800px){.stationFuelGrid{grid-template-columns:1fr}.stationFuelItem{align-items:flex-start}.stationFuelText{display:grid;grid-template-columns:minmax(80px,.8fr) minmax(0,1.2fr);align-items:start;column-gap:8px;row-gap:5px}.stationFuelName{grid-column:1}.stationFuelSelected{grid-column:1}.stationFuelItem .pill{grid-column:2}.stationFuelUpdated{grid-column:1/-1}.stationFuelSummaryHead{align-items:flex-start;flex-direction:column;gap:3px}.stationFuelSummaryHead span{text-align:left}}
 @media(max-width:500px){.stationFuelGrid{gap:7px}.stationFuelItem{padding:9px}.stationFuelText{grid-template-columns:1fr;gap:5px}.stationFuelName,.stationFuelSelected,.stationFuelItem .pill,.stationFuelUpdated{grid-column:1}.stationFuelSummaryHead strong{font-size:10px}.stationFuelSummaryHead span{font-size:9px}}
+
+/* BBM Siaga: pemilihan satu SPBU, refresh halaman, dan kembali ke awal */
+.headerActions{display:flex;align-items:center;gap:10px}
+.refreshButton{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid #dce8df;background:#fff;color:#176a44;border-radius:10px;padding:10px 12px;font-size:12px;font-weight:750;cursor:pointer;white-space:nowrap;transition:background .18s ease,border-color .18s ease}
+.refreshButton:hover:not(:disabled){background:#f0f8f2;border-color:#b8d8c2}
+.refreshButton:disabled{opacity:.7;cursor:wait}
+.refreshIcon{display:inline-block;font-size:19px;line-height:1}
+.refreshIcon.spinning{animation:bbm-spin .8s linear infinite}
+@keyframes bbm-spin{to{transform:rotate(360deg)}}
+.selected-station-filters{grid-template-columns:.75fr 1.6fr .85fr}
+.stationSearchResults{margin:14px 0 22px;background:#fff;border:1px solid #dce8df;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px #153b2310}
+.stationSearchResultsTitle{padding:12px 16px;background:#f5f9f5;color:#50675a;font-size:12px;font-weight:750}
+.stationSearchOption{width:100%;display:flex;align-items:center;gap:12px;padding:13px 16px;text-align:left;border:0;border-top:1px solid #edf1ed;background:#fff;cursor:pointer;color:var(--ink)}
+.stationSearchOption:hover,.stationSearchOption:focus-visible{background:#f5faf6;outline:0}
+.stationSearchPin{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:#e8f5ed;font-size:20px;flex:0 0 auto}
+.stationSearchOptionText{display:flex;flex:1;min-width:0;flex-direction:column;gap:2px}
+.stationSearchOptionText strong{font-size:13px}
+.stationSearchOptionText small{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.stationSearchChoose{font-size:11px;color:var(--green);font-weight:750;white-space:nowrap}
+.stationSearchMore{margin:0;padding:10px 16px;border-top:1px solid #edf1ed;color:var(--muted);font-size:11px}
+.selectedStationEmpty{padding:36px 20px;display:flex;align-items:center;flex-direction:column;text-align:center}
+.selectedStationEmpty strong{font-size:16px;margin-top:8px}
+.selectedStationEmpty p{max-width:520px;margin:7px 0 0;color:var(--muted);font-size:13px}
+.emptySearchIcon{display:grid;place-items:center;width:52px;height:52px;border-radius:17px;background:#e8f5ed;color:var(--green);font-size:32px}
+.selectedStationActions{display:flex;flex-direction:column;align-items:stretch;gap:9px;min-width:140px}
+.changeStationButton{border:1px solid #dce8df;background:#fff;color:#41604d;padding:10px 12px;border-radius:10px;font-size:11px;font-weight:750;cursor:pointer}
+.changeStationButton:hover{background:#f4f8f4}
+.backToTopButton{position:fixed;right:22px;bottom:22px;z-index:90;display:grid;place-items:center;width:46px;height:46px;border:1px solid #d9e6dc;border-radius:50%;background:#126b43;color:#fff;font-size:25px;font-weight:700;line-height:1;box-shadow:0 8px 24px #0b3d2833;cursor:pointer;transition:transform .18s ease,background .18s ease}
+.backToTopButton:hover{background:#0b5132;transform:translateY(-2px)}
+.backToTopButton:focus-visible,.refreshButton:focus-visible,.changeStationButton:focus-visible{outline:3px solid #a8d7b6;outline-offset:3px}
+@media(max-width:900px){.header{height:auto;min-height:78px;flex-wrap:wrap;padding-top:12px;padding-bottom:12px}.headerActions{margin-left:auto}.header nav{order:3;width:100%;justify-content:center;gap:18px;flex-wrap:wrap}.selected-station-filters{grid-template-columns:1fr 1fr}.selected-station-filters .stationSearchLabel{grid-column:1/-1;grid-row:1}.selectedStationActions{min-width:115px}}
+@media(max-width:600px){.header{gap:10px}.header nav{font-size:11px;gap:12px}.headerActions{gap:6px}.refreshButton{padding:9px;font-size:11px}.refreshButton>span:last-child{display:none}.navCta{padding:10px;font-size:11px}.selected-station-filters{grid-template-columns:1fr}.selected-station-filters .stationSearchLabel{grid-column:auto;grid-row:auto}.stationSearchOption{gap:8px;padding:12px}.stationSearchChoose{font-size:10px}.station{flex-wrap:wrap}.selectedStationActions{width:100%;flex-direction:row}.selectedStationActions>*{flex:1}.backToTopButton{right:14px;bottom:14px;width:42px;height:42px;font-size:23px}.stationSearchResultsTitle{font-size:11px}}
