@@ -1,4 +1,3 @@
-
 import { NextResponse } from "next/server";
 import { getDatabase } from "@netlify/database";
 
@@ -33,10 +32,22 @@ export async function GET() {
       ORDER BY station_id, fuel_type
     `;
 
+    const reports = await db.sql`
+      SELECT DISTINCT ON (station_id, fuel_type)
+        station_id,
+        fuel_type,
+        availability,
+        queue_level,
+        reported_at
+      FROM public.fuel_reports
+      ORDER BY station_id, fuel_type, reported_at DESC, id DESC
+    `;
+
     return NextResponse.json({
       success: true,
       stations,
       products,
+      reports,
     });
   } catch (error) {
     console.error("BBM Siaga stations API failed:", error);
