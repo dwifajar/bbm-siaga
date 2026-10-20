@@ -1,8 +1,8 @@
- "use client";
+"use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-const StationMap = dynamic(() => import("./station-map"), { ssr: false, loading: () => <div className="map-loading">Memuat peta pratinjau…</div> });
+const StationMap = dynamic(() => import("./station-map"), { ssr: false, loading: () => <div className="map-loading">Memuat peta lokasi SPBU…</div> });
 
 type Fuel = "Pertalite" | "Solar" | "Pertamax";
 type Status = "Tersedia" | "Terbatas" | "Kosong" | "Belum dikonfirmasi";
@@ -13,26 +13,117 @@ type Station = {
   demo?: boolean;
 };
 
-const initialStations: Station[] = [
-  { id: 1, name: "SPBU Contoh A", area: "Kota/Kabupaten Anda", distance: "2,1 km", demo: true,
-    fuels: {
-      Pertalite: { status: "Tersedia", queue: "Pendek", updated: "8 menit lalu" },
-      Solar: { status: "Belum dikonfirmasi", queue: "Belum diketahui", updated: "Belum ada laporan" },
-      Pertamax: { status: "Tersedia", queue: "Sedang", updated: "12 menit lalu" }
-    }},
-  { id: 2, name: "SPBU Contoh B", area: "Kota/Kabupaten Anda", distance: "4,8 km", demo: true,
-    fuels: {
-      Pertalite: { status: "Kosong", queue: "Panjang", updated: "15 menit lalu" },
-      Solar: { status: "Tersedia", queue: "Sedang", updated: "6 menit lalu" },
-      Pertamax: { status: "Terbatas", queue: "Pendek", updated: "20 menit lalu" }
-    }},
-  { id: 3, name: "SPBU Contoh C", area: "Kota/Kabupaten Anda", distance: "6,3 km", demo: true,
-    fuels: {
-      Pertalite: { status: "Belum dikonfirmasi", queue: "Belum diketahui", updated: "Belum ada laporan" },
-      Solar: { status: "Kosong", queue: "Sedang", updated: "32 menit lalu" },
-      Pertamax: { status: "Tersedia", queue: "Pendek", updated: "5 menit lalu" }
-    }}
-];
+type ApiStation = {
+  id: number | string;
+  name: string;
+  address: string | null;
+  city: string | null;
+};
+
+type ApiProduct = {
+  station_id: number | string;
+  fuel_type: string;
+  availability: string;
+  updated_at?: string | null;
+};
+
+type ApiReport = {
+  station_id: number | string;
+  fuel_type: string;
+  availability: string;
+  queue_level: string;
+  reported_at: string;
+};
+
+const availabilityToStatus: Record<string, Status> = {
+  available: "Tersedia",
+  limited: "Terbatas",
+  unavailable: "Kosong",
+  unknown: "Belum dikonfirmasi",
+};
+
+const statusToAvailability: Record<Status, string> = {
+  Tersedia: "available",
+  Terbatas: "limited",
+  Kosong: "unavailable",
+  "Belum dikonfirmasi": "unknown",
+};
+
+const queueToApi: Record<Queue, string> = {
+  Pendek: "short",
+  Sedang: "medium",
+  Panjang: "long",
+  "Belum diketahui": "unknown",
+};
+
+const apiToQueue: Record<string, Queue> = {
+  short: "Pendek",
+  medium: "Sedang",
+  long: "Panjang",
+  unknown: "Belum diketahui",
+};
+
+function formatUpdated(value?: string | null) {
+  if (!value) return "Belum ada laporan";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Waktu tidak diketahui";
+  return date.toLocaleString("id-ID", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+function mapApiStation(station: ApiStation, products: ApiProduct[], reports: ApiReport[]): Station {
+  const stationProducts = products.filter(
+    (product) => Number(product.station_id) === Number(station.id)
+  );
+  const stationReports = reports.filter(
+    (report) => Number(report.station_id) === Number(station.id)
+  );
+
+  const stationFuels = Object.fromEntries(
+    fuels.map((fuelName) => {
+      const product = stationProducts.find(
+        (item) => item.fuel_type === fuelName
+      );
+      const latestReport = stationReports.find(
+        (item) => item.fuel_type === fuelName
+      );
+
+      // Laporan terbaru ditampilkan sebagai laporan pengguna yang belum
+      // diverifikasi. Tanpa laporan, gunakan status produk resmi yang
+      // dikelola di station_fuel_products atau "Belum dikonfirmasi".
+      const statusSource = latestReport ?? product;
+      const status = statusSource
+        ? availabilityToStatus[statusSource.availability] ??
+          "Belum dikonfirmasi"
+        : "Belum dikonfirmasi";
+
+      return [
+        fuelName,
+        {
+          status,
+          queue: latestReport
+            ? apiToQueue[latestReport.queue_level] ?? "Belum diketahui"
+            : "Belum diketahui",
+          updated: latestReport
+            ? `Laporan pengguna • ${formatUpdated(latestReport.reported_at)}`
+            : formatUpdated(product?.updated_at),
+        },
+      ];
+    })
+  ) as Record<Fuel, { status: Status; queue: Queue; updated: string }>;
+
+  return {
+    id: Number(station.id),
+    name: station.name,
+    area: [station.address, station.city].filter(Boolean).join(", ") ||
+      "Lokasi belum dilengkapi",
+    distance: "Jarak belum tersedia",
+    fuels: stationFuels,
+    demo: /uji|contoh|demo/i.test(station.name),
+  };
+}
 
 const fuels: Fuel[] = ["Pertalite", "Solar", "Pertamax"];
 const statuses: Status[] = ["Tersedia", "Terbatas", "Kosong", "Belum dikonfirmasi"];
@@ -54,12 +145,84 @@ export default function Home() {
   const [fuel, setFuel] = useState<Fuel>("Pertalite");
   const [area, setArea] = useState("");
   const [queueFilter, setQueueFilter] = useState("Semua");
-  const [stations, setStations] = useState(initialStations);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [stations, setStations] = useState<Station[]>([]);
+  const [stationsLoading, setStationsLoading] = useState(true);
+  const [stationsError, setStationsError] = useState(false);
+  const [reportSending, setReportSending] = useState(false);
+  const [reportMessage, setReportMessage] = useState("");
+  const [reportMessageType, setReportMessageType] = useState<"success" | "error">("success");
   const [noticeOpen, setNoticeOpen] = useState(true);
   const [reportStation, setReportStation] = useState<number | null>(null);
   const [reportStatus, setReportStatus] = useState<Status>("Tersedia");
   const [reportQueue, setReportQueue] = useState<Queue>("Pendek");
-  const [reportSent, setReportSent] = useState(false);
+
+
+
+  const loadStations = useCallback(async (showLoading = false) => {
+    if (showLoading) {
+      setStationsLoading(true);
+      setStationsError(false);
+    }
+
+    try {
+      const response = await fetch("/api/stations", {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        throw new Error("Gagal membaca data SPBU dari server.");
+      }
+
+      const data: {
+        success?: boolean;
+        stations?: ApiStation[];
+        products?: ApiProduct[];
+        reports?: ApiReport[];
+      } = await response.json();
+
+      if (
+        !data.success ||
+        !Array.isArray(data.stations) ||
+        !Array.isArray(data.products) ||
+        !Array.isArray(data.reports)
+      ) {
+        throw new Error("Format data SPBU dari server tidak sesuai.");
+      }
+
+      const mapped = data.stations.map((station) =>
+        mapApiStation(station, data.products ?? [], data.reports ?? [])
+      );
+      setStations(mapped);
+      setStationsError(false);
+    } catch (error) {
+      console.error("Gagal memuat SPBU:", error);
+      // Pertahankan data terakhir yang berhasil dimuat saat refresh berkala
+      // gagal. Tampilkan pesan error hanya saat pemuatan awal/manual.
+      if (showLoading) setStationsError(true);
+    } finally {
+      if (showLoading) setStationsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadStations(true);
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void loadStations(false);
+      }
+    };
+
+    // Perubahan laporan dari pengguna lain akan tampak otomatis paling lambat
+    // sekitar 15 detik pada tab yang sedang aktif.
+    const intervalId = window.setInterval(refreshWhenVisible, 15000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [loadStations]);
 
   const visibleStations = useMemo(() => stations.filter(s => {
     const f = s.fuels[fuel];
@@ -68,19 +231,68 @@ export default function Home() {
     return matchesArea && matchesQueue;
   }), [stations, fuel, area, queueFilter]);
 
-  function submitDemoReport() {
-    if (reportStation === null) return;
-    setStations(prev => prev.map(s => s.id === reportStation
-      ? { ...s, fuels: { ...s.fuels, [fuel]: { status: reportStatus, queue: reportQueue, updated: "Baru saja (simulasi)" } } }
-      : s));
-    setReportSent(true);
-    setReportStation(null);
-    window.setTimeout(() => setReportSent(false), 3500);
+  const pageSize = 20;
+  const totalPages = Math.max(1, Math.ceil(visibleStations.length / pageSize));
+  const paginatedStations = useMemo(
+    () => visibleStations.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [visibleStations, currentPage]
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [fuel, area, queueFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
+  function openReport(station: Station) {
+    setReportStation(station.id);
+    setReportStatus(station.fuels[fuel].status);
+    setReportQueue(station.fuels[fuel].queue);
+    setReportMessage("");
+  }
+
+  async function submitReport() {
+    if (reportStation === null || reportSending) return;
+    setReportSending(true);
+    setReportMessage("");
+
+    try {
+      const response = await fetch("/api/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          station_id: reportStation,
+          fuel_type: fuel,
+          availability: statusToAvailability[reportStatus],
+          queue_level: queueToApi[reportQueue],
+          notes: null,
+          reporter_name: null,
+        }),
+      });
+      const result: { success?: boolean; message?: string } = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Laporan gagal disimpan.");
+      }
+
+      setReportStation(null);
+      await loadStations(false);
+      setReportMessage("Laporan tersimpan dan tampilan diperbarui. Pengguna lain akan menerima pembaruan otomatis.");
+      setReportMessageType("success");
+      window.setTimeout(() => setReportMessage(""), 5000);
+    } catch (error) {
+      console.error("Gagal mengirim laporan:", error);
+      setReportMessage(error instanceof Error ? error.message : "Laporan gagal disimpan. Silakan coba kembali.");
+      setReportMessageType("error");
+    } finally {
+      setReportSending(false);
+    }
   }
 
   return (
     <main>
-      <div className="topline"><div className="container topcontent"><span>● Informasi publik independen</span><span>Data contoh untuk pratinjau aplikasi</span></div></div>
+      <div className="topline"><div className="container topcontent"><span>● Informasi publik independen</span><span>Database • pembaruan otomatis tiap 15 detik</span></div></div>
       <header className="container header">
         <a className="brand" href="#" aria-label="BBM Siaga Beranda"><span className="brandIcon">⛽</span><span><strong>BBM Siaga</strong><small>Pantau BBM. Cek antrean.</small></span></a>
         <nav><a href="#peta">Peta SPBU</a><a href="#cari">Cari SPBU</a><a href="#cara-kerja">Cara kerja</a><a href="#tentang">Tentang</a></nav>
@@ -98,55 +310,92 @@ export default function Home() {
             <div className="trustLine"><span>✓</span> Waktu laporan ditampilkan <span>·</span> Status bisa berubah</div>
           </div>
           <div className="heroCard">
-            <div className="heroCardHead"><div><small>RINGKASAN INFORMASI</small><h3>Pantau pilihan BBM</h3></div><span className="liveTag"><i/> DEMO</span></div>
+            <div className="heroCardHead"><div><small>RINGKASAN INFORMASI</small><h3>Pantau pilihan BBM</h3></div><span className="liveTag"><i/> DATABASE</span></div>
             {fuels.map((f, i) => <button key={f} className={`fuelRow ${fuel === f ? "selected" : ""}`} onClick={() => { setFuel(f); document.getElementById("cari")?.scrollIntoView({ behavior: "smooth" }); }}>
               <span className={`fuelBadge fuel${i}`}>{i === 0 ? "P" : i === 1 ? "S" : "PX"}</span><span className="fuelName"><strong>{f}</strong><small>{i === 1 ? "Solar subsidi" : i === 0 ? "BBM bersubsidi" : "BBM nonsubsidi"}</small></span><span className="fuelArrow">↗</span>
             </button>)}
-            <div className="heroCardFoot"><span>ⓘ</span> Ini contoh tampilan, bukan data stok aktual.</div>
+            <div className="heroCardFoot"><span>ⓘ</span> Laporan pengguna • data dapat berubah sewaktu-waktu.</div>
           </div>
         </div>
       </section>
 
       <section className="container noticeWrap" id="tentang">
-        {noticeOpen && <div className="notice"><div className="noticeIcon">i</div><div><strong>Pemberitahuan penting</strong><p>BBM Siaga adalah aplikasi informasi publik independen, bukan aplikasi resmi PT Pertamina (Persero), PT Pertamina Patra Niaga, atau anak perusahaan/afiliasi Pertamina. Data pada pratinjau ini adalah simulasi, bukan laporan SPBU aktual.</p><a href="#disclaimer">Baca disclaimer lengkap ↓</a></div><button className="closeNotice" onClick={() => setNoticeOpen(false)} aria-label="Tutup pemberitahuan">×</button></div>}
+        {noticeOpen && <div className="notice"><div className="noticeIcon">i</div><div><strong>Pemberitahuan penting</strong><p>BBM Siaga adalah aplikasi informasi publik independen, bukan aplikasi resmi PT Pertamina (Persero), PT Pertamina Patra Niaga, atau anak perusahaan/afiliasi Pertamina. Laporan pada aplikasi berasal dari pengguna dan bukan konfirmasi resmi Pertamina. Pastikan lokasi dan kondisi sesuai yang Anda lihat.</p><a href="#disclaimer">Baca disclaimer lengkap ↓</a></div><button className="closeNotice" onClick={() => setNoticeOpen(false)} aria-label="Tutup pemberitahuan">×</button></div>}
       </section>
 
       <section className="container mapSection" id="peta">
-        <div className="sectionHeading"><div><div className="eyebrow dark">PETA LOKASI</div><h2>Lihat sebaran titik pada peta</h2><p>Pratinjau teknis peta interaktif. Lokasi marker belum diverifikasi sebagai SPBU sungguhan.</p></div><span className="demoPill">MARKER SIMULASI</span></div>
+        <div className="sectionHeading"><div><div className="eyebrow dark">PETA LOKASI</div><h2>Lihat sebaran titik pada peta</h2><p>Lokasi awal bersumber dari OpenStreetMap dan dapat belum lengkap. Informasi stok serta antrean berasal dari laporan pengguna.</p></div><span className="demoPill">LOKASI OSM</span></div>
         <StationMap />
       </section>
 
       <section className="container searchSection" id="cari">
-        <div className="sectionHeading"><div><div className="eyebrow dark">PENCARIAN SPBU</div><h2>Temukan BBM pilihan Anda</h2><p>Gunakan filter untuk melihat status tiap jenis BBM.</p></div><span className="demoPill">MODE PRATINJAU</span></div>
+        <div className="sectionHeading"><div><div className="eyebrow dark">PENCARIAN SPBU</div><h2>Temukan BBM pilihan Anda</h2><p>Gunakan filter untuk melihat status tiap jenis BBM.</p></div><span className="demoPill">DATA DATABASE</span></div>
         <div className="filters">
           <label className="filterLabel">Jenis BBM <span className="selectWrap"><select value={fuel} onChange={e => setFuel(e.target.value as Fuel)}>{fuels.map(f => <option key={f}>{f}</option>)}</select><b>⌄</b></span></label>
           <label className="filterLabel">Cari nama/wilayah SPBU <input value={area} onChange={e => setArea(e.target.value)} placeholder="Contoh: SPBU atau nama wilayah"/></label>
           <label className="filterLabel">Kondisi antrean <span className="selectWrap"><select value={queueFilter} onChange={e => setQueueFilter(e.target.value)}>{["Semua", ...queues].map(q => <option key={q}>{q}</option>)}</select><b>⌄</b></span></label>
         </div>
-        <div className="resultHeader"><strong>{visibleStations.length} lokasi contoh</strong><span>Data simulasi • tidak untuk navigasi aktual</span></div>
+        <div className="resultHeader"><strong>{stationsLoading ? "Memuat data SPBU…" : `${visibleStations.length} lokasi dari database`}</strong><span>Data dapat berubah • konfirmasi sebelum berangkat</span></div>
         <div className="stationList">
-          {visibleStations.map(s => <article className="station" key={s.id}>
-            <div className="stationPin">⛽</div><div className="stationMain"><div className="stationTitle"><h3>{s.name}</h3><span className="demoTag">CONTOH</span></div><p className="stationArea">⌖ {s.area} <span>·</span> {s.distance}</p><div className="stationDetails"><span className={`pill ${statusClass(s.fuels[fuel].status)}`}><i/> {s.fuels[fuel].status}</span><span className={`pill ${queueClass(s.fuels[fuel].queue)}`}><i/> Antrean {s.fuels[fuel].queue.toLowerCase()}</span></div><small className="updated">◷ Pembaruan: {s.fuels[fuel].updated}</small></div>
-            <button className="reportButton" onClick={() => { setReportStation(s.id); setReportStatus(s.fuels[fuel].status); setReportQueue(s.fuels[fuel].queue); setReportSent(false); }}>＋ Laporkan</button>
+          {stationsLoading && <div className="empty">Sedang memuat data SPBU…</div>}
+          {!stationsLoading && stationsError && <div className="empty">Data SPBU gagal dimuat. Silakan muat ulang halaman.</div>}
+          {paginatedStations.map(s => <article className="station" key={s.id}>
+            <div className="stationPin">⛽</div><div className="stationMain"><div className="stationTitle"><h3>{s.name}</h3>{s.demo && <span className="demoTag">DATA UJI</span>}</div><p className="stationArea">⌖ {s.area} <span>·</span> {s.distance}</p><div className="stationDetails"><span className={`pill ${statusClass(s.fuels[fuel].status)}`}><i/> {s.fuels[fuel].status}</span><span className={`pill ${queueClass(s.fuels[fuel].queue)}`}><i/> Antrean {s.fuels[fuel].queue.toLowerCase()}</span></div><small className="updated">◷ Pembaruan: {s.fuels[fuel].updated}</small></div>
+            <button className="reportButton" onClick={() => openReport(s)}>＋ Laporkan</button>
           </article>)}
-          {visibleStations.length === 0 && <div className="empty">Tidak ada lokasi contoh yang cocok. Coba ubah kata pencarian atau filter antrean.</div>}
+          {!stationsLoading && !stationsError && visibleStations.length === 0 && <div className="empty">Belum ada SPBU yang cocok atau belum ada data SPBU di database. SPBU baru akan muncul setelah ditambahkan ke sistem.</div>}
         </div>
+
+        {!stationsLoading && !stationsError && visibleStations.length > pageSize && (
+          <div
+            className="bbm-pagination"
+            aria-label="Navigasi halaman daftar SPBU"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 12,
+              flexWrap: "wrap",
+              marginTop: 18,
+            }}
+          >
+            <button
+              type="button"
+              className="button primary"
+              disabled={currentPage <= 1}
+              onClick={() => setCurrentPage((pageNumber) => Math.max(1, pageNumber - 1))}
+            >
+              ← Sebelumnya
+            </button>
+            <span style={{ fontSize: 12, color: "#68786d", textAlign: "center" }}>
+              Halaman {currentPage} dari {totalPages} · menampilkan {((currentPage - 1) * pageSize) + 1}–{Math.min(currentPage * pageSize, visibleStations.length)} dari {visibleStations.length.toLocaleString("id-ID")} lokasi
+            </span>
+            <button
+              type="button"
+              className="button primary"
+              disabled={currentPage >= totalPages}
+              onClick={() => setCurrentPage((pageNumber) => Math.min(totalPages, pageNumber + 1))}
+            >
+              Berikutnya →
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="howSection" id="cara-kerja"><div className="container"><div className="sectionHeading centered"><div><div className="eyebrow dark">MUDAH DAN TRANSPARAN</div><h2>Informasi lebih jelas, keputusan lebih baik.</h2><p>Setiap informasi perlu memiliki sumber dan waktu pembaruan.</p></div></div><div className="howGrid">
         <div className="howCard"><span className="howNum">01</span><div className="howIcon">⌕</div><h3>Pilih jenis BBM</h3><p>Pilih Pertalite, Solar, atau Pertamax sesuai kebutuhan Anda.</p></div>
-        <div className="howCard"><span className="howNum">02</span><div className="howIcon">◷</div><h3>Periksa laporan</h3><p>Perhatikan status, antrean, waktu pembaruan, dan tingkat verifikasi.</p></div>
+        <div className="howCard"><span className="howNum">02</span><div className="howIcon">◷</div><h3>Periksa laporan</h3><p>Perhatikan status, antrean, dan waktu laporan terbaru dari pengguna.</p></div>
         <div className="howCard"><span className="howNum">03</span><div className="howIcon">↗</div><h3>Konfirmasi dahulu</h3><p>Pastikan informasi kepada SPBU sebelum melakukan perjalanan.</p></div>
       </div></div></section>
 
-      <section className="container reportSection" id="lapor"><div className="reportBanner"><div><div className="eyebrow light">BANTU SESAMA PENGGUNA</div><h2>Baru dari SPBU?</h2><p>Informasi dari lapangan membantu masyarakat lain. Versi produksi akan mengirim laporan ke sistem setelah validasi.</p></div><a className="button lightButton" href="#cari">Pilih lokasi untuk melapor <span>→</span></a></div></section>
+      <section className="container reportSection" id="lapor"><div className="reportBanner"><div><div className="eyebrow light">BANTU SESAMA PENGGUNA</div><h2>Baru dari SPBU?</h2><p>Laporan langsung ditampilkan sebagai informasi terbaru dari pengguna. Sampaikan kondisi yang benar-benar Anda lihat di SPBU.</p></div><a className="button lightButton" href="#cari">Pilih lokasi untuk melapor <span>→</span></a></div></section>
 
-      <section className="container disclaimer" id="disclaimer"><div className="disclaimerIcon">ⓘ</div><div><h3>Disclaimer dan batas penggunaan</h3><p>BBM Siaga merupakan layanan informasi publik independen. Aplikasi ini tidak dimiliki, dikelola, disponsori, didukung, atau mewakili PT Pertamina (Persero), PT Pertamina Patra Niaga, maupun anak perusahaan atau afiliasinya. Nama produk BBM digunakan hanya untuk mengidentifikasi jenis bahan bakar.</p><p>Informasi stok dan antrean dapat berasal dari laporan pengguna, petugas yang berpartisipasi, atau sumber lain. Informasi dapat berubah dan tidak menjamin ketersediaan, waktu tunggu, maupun pelayanan. Patuhi ketentuan pembelian dan penyaluran BBM yang berlaku. Hubungi SPBU untuk konfirmasi sebelum berangkat.</p></div></section>
+      <section className="container disclaimer" id="disclaimer"><div className="disclaimerIcon">ⓘ</div><div><h3>Disclaimer dan batas penggunaan</h3><p>BBM Siaga merupakan layanan informasi publik independen. Aplikasi ini tidak dimiliki, dikelola, disponsori, didukung, atau mewakili PT Pertamina (Persero), PT Pertamina Patra Niaga, maupun anak perusahaan atau afiliasinya. Nama produk BBM digunakan hanya untuk mengidentifikasi jenis bahan bakar.</p><p>Informasi stok dan antrean dapat berasal dari laporan pengguna. Laporan terbaru ditampilkan tanpa persetujuan admin dan dapat tidak akurat atau kedaluwarsa. Informasi tidak menjamin ketersediaan, waktu tunggu, maupun pelayanan; konfirmasi kepada SPBU sebelum berangkat. Patuhi ketentuan pembelian dan penyaluran BBM yang berlaku. Hubungi SPBU untuk konfirmasi sebelum berangkat.</p></div></section>
 
       <footer><div className="container footerInner"><a className="brand footerBrand" href="#"><span className="brandIcon">⛽</span><span><strong>BBM Siaga</strong><small>Informasi publik independen</small></span></a><span>© {new Date().getFullYear()} BBM Siaga. Bukan aplikasi resmi Pertamina.</span><a href="#disclaimer">Disclaimer</a></div></footer>
 
-      {reportStation !== null && <div className="modalBackdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setReportStation(null); }}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><button className="modalClose" onClick={() => setReportStation(null)} aria-label="Tutup">×</button><div className="eyebrow dark">LAPORAN SIMULASI</div><h2 id="modalTitle">Perbarui informasi SPBU</h2><p className="modalIntro">Pilih status untuk {stations.find(s => s.id === reportStation)?.name}. Perubahan hanya tersimpan di pratinjau browser ini.</p><label className="filterLabel">Jenis BBM<select value={fuel} onChange={e => setFuel(e.target.value as Fuel)}>{fuels.map(f => <option key={f}>{f}</option>)}</select></label><label className="filterLabel">Status stok<select value={reportStatus} onChange={e => setReportStatus(e.target.value as Status)}>{statuses.map(s => <option key={s}>{s}</option>)}</select></label><label className="filterLabel">Kondisi antrean<select value={reportQueue} onChange={e => setReportQueue(e.target.value as Queue)}>{queues.map(q => <option key={q}>{q}</option>)}</select></label><div className="modalWarning">⚠️ Ini belum mengirim laporan ke server atau memverifikasi kondisi nyata.</div><button className="button primary full" onClick={submitDemoReport}>Perbarui pratinjau</button></div></div>}
-      {reportSent && <div className="toast" role="status">✓ Pratinjau diperbarui. Belum tersimpan ke server.</div>}
+      {reportStation !== null && <div className="modalBackdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget && !reportSending) setReportStation(null); }}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><button className="modalClose" onClick={() => !reportSending && setReportStation(null)} aria-label="Tutup" disabled={reportSending}>×</button><div className="eyebrow dark">LAPORAN PENGGUNA</div><h2 id="modalTitle">Perbarui informasi SPBU</h2><p className="modalIntro">Pilih status untuk {stations.find(s => s.id === reportStation)?.name}. Laporan akan langsung ditampilkan sebagai laporan terbaru untuk jenis BBM ini. Mohon laporkan kondisi yang benar-benar Anda lihat.</p><label className="filterLabel">Jenis BBM<select value={fuel} onChange={e => setFuel(e.target.value as Fuel)}>{fuels.map(f => <option key={f}>{f}</option>)}</select></label><label className="filterLabel">Status stok<select value={reportStatus} onChange={e => setReportStatus(e.target.value as Status)}>{statuses.map(s => <option key={s}>{s}</option>)}</select></label><label className="filterLabel">Kondisi antrean<select value={reportQueue} onChange={e => setReportQueue(e.target.value as Queue)}>{queues.map(q => <option key={q}>{q}</option>)}</select></label><div className="modalWarning">Laporan langsung menjadi laporan terbaru yang ditampilkan. Pastikan laporan sesuai kondisi yang Anda lihat; data ini bukan konfirmasi resmi stok BBM.</div><button className="button primary full" onClick={() => void submitReport()} disabled={reportSending}>{reportSending ? "Mengirim laporan…" : "Kirim laporan"}</button></div></div>}
+      {reportMessage && <div className="toast" role="status" aria-live="polite" data-status={reportMessageType}>{reportMessageType === "success" ? "✓ " : "⚠ "}{reportMessage}</div>}
     </main>
   );
 }
