@@ -18,13 +18,12 @@ type ApiStation = {
   name: string;
   address: string | null;
   city: string | null;
-};
-
-type ApiProduct = {
-  station_id: number | string;
-  fuel_type: string;
-  availability: string;
-  updated_at?: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  brand?: string | null;
+  data_source?: string | null;
+  osm_type?: string | null;
+  osm_id?: number | null;
 };
 
 type ApiReport = {
@@ -75,56 +74,47 @@ function formatUpdated(value?: string | null) {
   });
 }
 
-function mapApiStation(station: ApiStation, products: ApiProduct[], reports: ApiReport[]): Station {
-  const stationProducts = products.filter(
-    (product) => Number(product.station_id) === Number(station.id)
-  );
-  const stationReports = reports.filter(
-    (report) => Number(report.station_id) === Number(station.id)
-  );
-
+function mapApiStation(station: ApiStation): Station {
   const stationFuels = Object.fromEntries(
-    fuels.map((fuelName) => {
-      const product = stationProducts.find(
-        (item) => item.fuel_type === fuelName
-      );
-      const latestReport = stationReports.find(
-        (item) => item.fuel_type === fuelName
-      );
-
-      // Laporan terbaru ditampilkan sebagai laporan pengguna yang belum
-      // diverifikasi. Tanpa laporan, gunakan status produk resmi yang
-      // dikelola di station_fuel_products atau "Belum dikonfirmasi".
-      const statusSource = latestReport ?? product;
-      const status = statusSource
-        ? availabilityToStatus[statusSource.availability] ??
-          "Belum dikonfirmasi"
-        : "Belum dikonfirmasi";
-
-      return [
-        fuelName,
-        {
-          status,
-          queue: latestReport
-            ? apiToQueue[latestReport.queue_level] ?? "Belum diketahui"
-            : "Belum diketahui",
-          updated: latestReport
-            ? `Laporan pengguna • ${formatUpdated(latestReport.reported_at)}`
-            : formatUpdated(product?.updated_at),
-        },
-      ];
-    })
+    fuels.map((fuelName) => [
+      fuelName,
+      {
+        status: "Belum dikonfirmasi" as Status,
+        queue: "Belum diketahui" as Queue,
+        updated: "Belum ada laporan",
+      },
+    ])
   ) as Record<Fuel, { status: Status; queue: Queue; updated: string }>;
 
   return {
     id: Number(station.id),
-    name: station.name,
-    area: [station.address, station.city].filter(Boolean).join(", ") ||
-      "Lokasi belum dilengkapi",
+    name: station.name || "Lokasi BBM tanpa nama",
+    area: [station.address, station.city].filter(Boolean).join(", ") || "Wilayah belum tersedia",
     distance: "Jarak belum tersedia",
     fuels: stationFuels,
-    demo: /uji|contoh|demo/i.test(station.name),
+    demo: false,
   };
+}
+
+function applyStationReports(station: Station, reports: ApiReport[]): Station {
+  const nextFuels = { ...station.fuels };
+  for (const fuelName of fuels) {
+    const report = reports.find((item) => item.fuel_type === fuelName);
+    if (!report) {
+      nextFuels[fuelName] = {
+        status: "Belum dikonfirmasi",
+        queue: "Belum diketahui",
+        updated: "Belum ada laporan",
+      };
+      continue;
+    }
+    nextFuels[fuelName] = {
+      status: availabilityToStatus[report.availability] ?? "Belum dikonfirmasi",
+      queue: apiToQueue[report.queue_level] ?? "Belum diketahui",
+      updated: `Laporan pengguna • ${formatUpdated(report.reported_at)}`,
+    };
+  }
+  return { ...station, fuels: nextFuels };
 }
 
 const fuels: Fuel[] = ["Pertalite", "Solar", "Pertamax"];
@@ -190,41 +180,37 @@ export default function Home() {
     }
 
     try {
-      const response = await fetch("/api/stations", {
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        throw new Error("Gagal membaca data SPBU dari server.");
-      }
-
-      const data: {
-        success?: boolean;
-        stations?: ApiStation[];
-        products?: ApiProduct[];
-        reports?: ApiReport[];
-      } = await response.json();
-
-      if (
-        !data.success ||
-        !Array.isArray(data.stations) ||
-        !Array.isArray(data.products) ||
-        !Array.isArray(data.reports)
-      ) {
-        throw new Error("Format data SPBU dari server tidak sesuai.");
-      }
-
-      const mapped = data.stations.map((station) =>
-        mapApiStation(station, data.products ?? [], data.reports ?? [])
-      );
-      setStations(mapped);
+      // Daftar lokasi dikirim sebagai aset statis CDN. Karena tidak berubah
+      // setiap 15 detik, aplikasi tidak perlu membaca 5.657 baris dari D1.
+      const response = await fetch("/data/stations.json");
+      if (!response.ok) throw new Error("Gagal membaca daftar lokasi SPBU.");
+      const data: ApiStation[] = await response.json();
+      if (!Array.isArray(data)) throw new Error("Format daftar lokasi SPBU tidak sesuai.");
+      setStations(data.map((station) => mapApiStation(station)));
       setStationsError(false);
     } catch (error) {
-      console.error("Gagal memuat SPBU:", error);
-      // Pertahankan data terakhir yang berhasil dimuat saat refresh berkala
-      // gagal. Tampilkan pesan error hanya saat pemuatan awal/manual.
+      console.error("Gagal memuat daftar SPBU:", error);
       if (showLoading) setStationsError(true);
     } finally {
       if (showLoading) setStationsLoading(false);
+    }
+  }, []);
+
+  const loadReportsForStation = useCallback(async (stationId: number) => {
+    try {
+      const response = await fetch(`/api/reports?station_id=${encodeURIComponent(String(stationId))}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error("Gagal membaca laporan SPBU.");
+      const data: { success?: boolean; reports?: ApiReport[] } = await response.json();
+      if (!data.success || !Array.isArray(data.reports)) {
+        throw new Error("Format laporan dari server tidak sesuai.");
+      }
+      setStations((previous) => previous.map((station) =>
+        station.id === stationId ? applyStationReports(station, data.reports ?? []) : station
+      ));
+    } catch (error) {
+      console.error("Gagal memperbarui laporan SPBU:", error);
     }
   }, []);
 
@@ -247,23 +233,27 @@ export default function Home() {
 
   useEffect(() => {
     void loadStations(true);
+  }, [loadStations]);
+
+  useEffect(() => {
+    if (stationsLoading || stationsError || selectedStationId === null) return;
+    void loadReportsForStation(selectedStationId);
 
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") {
-        void loadStations(false);
+        void loadReportsForStation(selectedStationId);
       }
     };
 
-    // Perubahan laporan dari pengguna lain akan tampak otomatis paling lambat
-    // sekitar 15 detik pada tab yang sedang aktif.
-    const intervalId = window.setInterval(refreshWhenVisible, 15000);
+    // Pembaruan laporan dipusatkan pada SPBU yang sedang dilihat, sehingga
+    // setiap polling hanya membaca beberapa baris D1, bukan semua lokasi nasional.
+    const intervalId = window.setInterval(refreshWhenVisible, 60000);
     document.addEventListener("visibilitychange", refreshWhenVisible);
-
     return () => {
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [loadStations]);
+  }, [selectedStationId, stationsLoading, stationsError, loadReportsForStation]);
 
   // Pulihkan SPBU terpilih setelah daftar database selesai dimuat.
   // Prioritaskan parameter URL agar tautan pilihan SPBU juga dapat dibuka ulang,
@@ -299,6 +289,7 @@ export default function Home() {
       if (restoredStation) {
         setSelectedStationId(restoredStation.id);
         setArea(restoredStation.name);
+        void loadReportsForStation(restoredStation.id);
         window.localStorage.setItem("bbmsiaga:selectedStationId", String(restoredStation.id));
         window.localStorage.setItem("bbmsiaga:selectedStationName", restoredStation.name);
 
@@ -327,14 +318,14 @@ export default function Home() {
     } catch (error) {
       console.warn("Pilihan SPBU sebelumnya tidak dapat dipulihkan:", error);
     }
-  }, [stations, stationsLoading, stationsError]);
+  }, [stations, stationsLoading, stationsError, loadReportsForStation]);
 
   const visibleStations = useMemo(() => stations.filter(s => {
     const f = s.fuels[fuel];
     const matchesArea = !area || `${s.name} ${s.area}`.toLowerCase().includes(area.toLowerCase());
-    const matchesQueue = queueFilter === "Semua" || f.queue === queueFilter;
+    const matchesQueue = selectedStationId === null || queueFilter === "Semua" || f.queue === queueFilter;
     return matchesArea && matchesQueue;
-  }), [stations, fuel, area, queueFilter]);
+  }), [stations, fuel, area, queueFilter, selectedStationId]);
 
   const selectedStation = useMemo(
     () => selectedStationId === null
@@ -360,6 +351,7 @@ export default function Home() {
     // memilih SPBU yang berbeda, pilihan yang baru menggantikan pilihan lama.
     setSelectedStationId(station.id);
     setArea(station.name);
+    void loadReportsForStation(station.id);
     searchChangedBeforeRestoreRef.current = false;
     selectionRestoredRef.current = true;
 
@@ -419,7 +411,7 @@ export default function Home() {
       }
 
       setReportStation(null);
-      await loadStations(false);
+      await loadReportsForStation(reportStation);
       setReportMessage("Laporan tersimpan dan tampilan diperbarui. Pengguna lain akan menerima pembaruan otomatis.");
       setReportMessageType("success");
       window.setTimeout(() => setReportMessage(""), 5000);
@@ -434,7 +426,7 @@ export default function Home() {
 
   return (
     <main>
-      <div className="topline"><div className="container topcontent"><span>● Informasi publik independen</span><span>Database • pembaruan otomatis tiap 15 detik</span></div></div>
+      <div className="topline"><div className="container topcontent"><span>● Informasi publik independen</span><span>Cloudflare D1 • laporan SPBU pilihan diperbarui otomatis tiap 60 detik</span></div></div>
       <header className="container header">
         <a className="brand" href="#" aria-label="BBM Siaga Beranda"><span className="brandIcon">⛽</span><span><strong>BBM Siaga</strong><small>Pantau BBM. Cek antrean.</small></span></a>
         <nav><a href="#peta">Peta SPBU</a><a href="#cari">Cari SPBU</a><a href="#cara-kerja">Cara kerja</a><a href="#tentang">Tentang</a></nav>

@@ -51,28 +51,3 @@
 .backToTopButton:focus-visible,.refreshButton:focus-visible,.changeStationButton:focus-visible{outline:3px solid #a8d7b6;outline-offset:3px}
 @media(max-width:900px){.header{height:auto;min-height:78px;flex-wrap:wrap;padding-top:12px;padding-bottom:12px}.headerActions{margin-left:auto}.header nav{order:3;width:100%;justify-content:center;gap:18px;flex-wrap:wrap}.selected-station-filters{grid-template-columns:1fr 1fr}.selected-station-filters .stationSearchLabel{grid-column:1/-1;grid-row:1}.selectedStationActions{min-width:115px}}
 @media(max-width:600px){.header{gap:10px}.header nav{font-size:11px;gap:12px}.headerActions{gap:6px}.refreshButton{padding:9px;font-size:11px}.refreshButton>span:last-child{display:none}.navCta{padding:10px;font-size:11px}.selected-station-filters{grid-template-columns:1fr}.selected-station-filters .stationSearchLabel{grid-column:auto;grid-row:auto}.stationSearchOption{gap:8px;padding:12px}.stationSearchChoose{font-size:10px}.station{flex-wrap:wrap}.selectedStationActions{width:100%;flex-direction:row}.selectedStationActions>*{flex:1}.backToTopButton{right:14px;bottom:14px;width:42px;height:42px;font-size:23px}.stationSearchResultsTitle{font-size:11px}}
-
-/* BBM Siaga: posisi credit footer konsisten dengan copyright */
-.footerCredit {
-  font-size: 10px;
-  color: #829087;
-  font-weight: 650;
-  white-space: nowrap;
-}
-
-@media (max-width: 600px) {
-  .footerInner {
-    flex-wrap: wrap;
-    justify-content: center;
-    text-align: center;
-    padding-top: 16px;
-    padding-bottom: 16px;
-  }
-  .footerInner > .footerBrand {
-    flex-basis: 100%;
-    justify-content: center;
-  }
-  .footerInner > span {
-    text-align: center;
-  }
-}

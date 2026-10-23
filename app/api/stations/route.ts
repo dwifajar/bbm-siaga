@@ -1,62 +1,46 @@
 import { NextResponse } from "next/server";
-import { getDatabase } from "@netlify/database";
+import { getBBMSiagaDB } from "../../lib/d1";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  try {
-    const db = getDatabase();
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const query = (url.searchParams.get("q") ?? "").trim();
+  const requestedLimit = Number(url.searchParams.get("limit") ?? "20");
+  const limit = Number.isInteger(requestedLimit)
+    ? Math.min(50, Math.max(1, requestedLimit))
+    : 20;
 
-    const stations = await db.sql`
-      SELECT
-        s.id,
-        s.name,
-        s.address,
-        s.city,
-        s.latitude,
-        s.longitude,
-        s.created_at,
-        s.updated_at
-      FROM public.stations AS s
-      ORDER BY s.name ASC
-    `;
-
-    const products = await db.sql`
-      SELECT
-        station_id,
-        fuel_type,
-        availability,
-        updated_at
-      FROM public.station_fuel_products
-      ORDER BY station_id, fuel_type
-    `;
-
-    const reports = await db.sql`
-      SELECT DISTINCT ON (station_id, fuel_type)
-        station_id,
-        fuel_type,
-        availability,
-        queue_level,
-        reported_at
-      FROM public.fuel_reports
-      ORDER BY station_id, fuel_type, reported_at DESC, id DESC
-    `;
-
+  if (query.length < 2) {
     return NextResponse.json({
       success: true,
-      stations,
-      products,
-      reports,
+      stations: [],
+      message: "Untuk mencari, kirim parameter q dengan minimal 2 karakter. Daftar lokasi lengkap tersedia sebagai data statis.",
     });
-  } catch (error) {
-    console.error("BBM Siaga stations API failed:", error);
+  }
+
+  try {
+    const db = getBBMSiagaDB();
+    const pattern = `%${query}%`;
+    const result = await db.prepare(`
+      SELECT id, name, address, city, latitude, longitude, brand, data_source
+      FROM stations
+      WHERE name LIKE ?
+         OR COALESCE(address, '') LIKE ?
+         OR COALESCE(city, '') LIKE ?
+      ORDER BY name COLLATE NOCASE
+      LIMIT ?
+    `).bind(pattern, pattern, pattern, limit).all();
 
     return NextResponse.json(
-      {
-        success: false,
-        message: "Gagal membaca data SPBU.",
-      },
+      { success: true, stations: result.results },
+      { headers: { "Cache-Control": "no-store" } }
+    );
+  } catch (error) {
+    console.error("BBM Siaga station search failed:", error);
+    return NextResponse.json(
+      { success: false, message: "Pencarian SPBU gagal. Silakan coba kembali." },
       { status: 500 }
     );
   }

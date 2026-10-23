@@ -20,12 +20,6 @@ type ApiReport = {
   reported_at: string;
 };
 
-type ApiResponse = {
-  success?: boolean;
-  stations?: ApiStation[];
-  reports?: ApiReport[];
-};
-
 const fuelNames = ["Pertalite", "Solar", "Pertamax"];
 const statusLabels: Record<string, string> = {
   available: "Tersedia",
@@ -34,10 +28,11 @@ const statusLabels: Record<string, string> = {
   unknown: "Belum dikonfirmasi",
 };
 const queueLabels: Record<string, string> = {
-  short: "Pendek",
-  medium: "Sedang",
-  long: "Panjang",
-  unknown: "Belum diketahui",
+  none: "Tidak antre",
+  short: "Antrean sepi",
+  medium: "Antrean sedang",
+  long: "Antrean panjang",
+  unknown: "Antrean belum diketahui",
 };
 
 function formatTime(value?: string) {
@@ -66,22 +61,16 @@ function makePopup(station: ApiStation, reports: ApiReport[]): HTMLElement {
   const matchingReports = reports.filter(
     (report) => Number(report.station_id) === Number(station.id)
   );
-
-  if (matchingReports.length === 0) {
-    const noReport = document.createElement("small");
-    noReport.textContent = "Belum ada laporan stok atau antrean dari pengguna.";
-    root.appendChild(noReport);
-  } else {
-    for (const fuel of fuelNames) {
-      const report = matchingReports.find((item) => item.fuel_type === fuel);
-      if (!report) continue;
-
-      const line = document.createElement("span");
-      line.textContent =
-        `${fuel}: ${statusLabels[report.availability] ?? "Belum dikonfirmasi"} · ` +
-        `antrean ${queueLabels[report.queue_level] ?? "Belum diketahui"}`;
-      root.appendChild(line);
-
+  for (const fuel of fuelNames) {
+    const report = matchingReports.find((item) => item.fuel_type === fuel);
+    const line = document.createElement("span");
+    if (!report) {
+      line.textContent = `${fuel}: belum ada laporan stok atau antrean`;
+    } else {
+      line.textContent = `${fuel}: ${statusLabels[report.availability] ?? "Belum dikonfirmasi"} · ${queueLabels[report.queue_level] ?? "Antrean belum diketahui"}`;
+    }
+    root.appendChild(line);
+    if (report) {
       const time = document.createElement("small");
       time.textContent = `Laporan pengguna: ${formatTime(report.reported_at)}`;
       root.appendChild(time);
@@ -89,10 +78,8 @@ function makePopup(station: ApiStation, reports: ApiReport[]): HTMLElement {
   }
 
   const note = document.createElement("small");
-  note.textContent =
-    "Lokasi dari OpenStreetMap. Status stok dan antrean adalah laporan pengguna, bukan konfirmasi resmi.";
+  note.textContent = "Lokasi dari OpenStreetMap. Stok dan antrean adalah laporan pengguna, bukan konfirmasi resmi.";
   root.appendChild(note);
-
   return root;
 }
 
@@ -108,120 +95,88 @@ export default function StationMap() {
 
     const map = L.map(containerRef.current, {
       preferCanvas: true,
-      // Aktifkan zoom dengan roda/scroll mouse ketika kursor berada di peta.
       scrollWheelZoom: true,
       wheelDebounceTime: 60,
       wheelPxPerZoomLevel: 100,
     }).setView([-2.5, 118], 4);
-
     mapRef.current = map;
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors',
     }).addTo(map);
 
     const markerLayer = L.layerGroup().addTo(map);
     const canvasRenderer = L.canvas({ padding: 0.4 });
     const controller = new AbortController();
-    let markersBuilt = false;
-    let latestReports: ApiReport[] = [];
-    let lastStationIds = "";
 
-    async function loadMapData() {
+    async function loadMapLocations() {
       try {
-        const response = await fetch("/api/stations", {
-          cache: "no-store",
-          signal: controller.signal,
-        });
+        // Coordinates are delivered as a static asset, not repeatedly read from D1.
+        const response = await fetch("/data/stations.json", { signal: controller.signal });
         if (!response.ok) throw new Error("Gagal memuat data lokasi.");
+        const stations: ApiStation[] = await response.json();
+        if (!Array.isArray(stations)) throw new Error("Format lokasi tidak sesuai.");
 
-        const data: ApiResponse = await response.json();
-        if (!data.success || !Array.isArray(data.stations) || !Array.isArray(data.reports)) {
-          throw new Error("Format data lokasi tidak sesuai.");
-        }
-
-        latestReports = data.reports;
-        const usableStations = data.stations.filter((station) => {
+        const usableStations = stations.filter((station) => {
           const latitude = Number(station.latitude);
           const longitude = Number(station.longitude);
-          return Number.isFinite(latitude) &&
-            Number.isFinite(longitude) &&
-            latitude >= -90 && latitude <= 90 &&
-            longitude >= -180 && longitude <= 180 &&
-            station.latitude !== null &&
-            station.longitude !== null;
+          return station.latitude !== null && station.longitude !== null &&
+            Number.isFinite(latitude) && Number.isFinite(longitude) &&
+            latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
         });
+        const points: L.LatLng[] = [];
 
-        const currentStationIds = usableStations
-          .map((station) => String(station.id))
-          .sort()
-          .join(",");
+        for (const station of usableStations) {
+          const point = L.latLng(Number(station.latitude), Number(station.longitude));
+          points.push(point);
+          const marker = L.circleMarker(point, {
+            renderer: canvasRenderer,
+            radius: 4,
+            color: "#ffffff",
+            weight: 1,
+            fillColor: "#147748",
+            fillOpacity: 0.84,
+          });
 
-        if (!markersBuilt || currentStationIds !== lastStationIds) {
-          markerLayer.clearLayers();
-          const points: L.LatLng[] = [];
-
-          for (const station of usableStations) {
-            const lat = Number(station.latitude);
-            const lon = Number(station.longitude);
-            const point = L.latLng(lat, lon);
-            points.push(point);
-
-            const marker = L.circleMarker(point, {
-              renderer: canvasRenderer,
-              radius: 4,
-              color: "#ffffff",
-              weight: 1,
-              fillColor: "#147748",
-              fillOpacity: 0.84,
-            });
-
-            // Popup diisi dengan DOM textContent agar teks data tidak
-            // dieksekusi sebagai HTML.
-            marker.bindPopup(() => makePopup(station, latestReports));
-            markerLayer.addLayer(marker);
-          }
-
-          if (points.length > 0) {
-            map.fitBounds(L.latLngBounds(points), {
-              padding: [18, 18],
-              maxZoom: 5,
-            });
-          } else {
-            map.setView([-2.5, 118], 4);
-          }
-
-          markersBuilt = true;
-          lastStationIds = currentStationIds;
-          setStationCount(points.length);
-          window.setTimeout(() => map.invalidateSize(), 80);
-        } else {
-          setStationCount(usableStations.length);
+          marker.bindPopup("Memuat laporan SPBU…");
+          marker.on("popupopen", async () => {
+            try {
+              const reportResponse = await fetch(`/api/reports?station_id=${encodeURIComponent(String(station.id))}`, {
+                cache: "no-store",
+                signal: controller.signal,
+              });
+              if (!reportResponse.ok) throw new Error("Gagal membaca laporan");
+              const data: { success?: boolean; reports?: ApiReport[] } = await reportResponse.json();
+              if (!data.success || !Array.isArray(data.reports)) throw new Error("Format laporan tidak sesuai");
+              marker.setPopupContent(makePopup(station, data.reports));
+            } catch (error) {
+              if (error instanceof Error && error.name === "AbortError") return;
+              marker.setPopupContent(makePopup(station, []));
+            }
+          });
+          markerLayer.addLayer(marker);
         }
 
+        if (points.length > 0) {
+          map.fitBounds(L.latLngBounds(points), { padding: [18, 18], maxZoom: 5 });
+        } else {
+          map.setView([-2.5, 118], 4);
+        }
+        setStationCount(points.length);
+        setLoadMessage(`${points.length.toLocaleString("id-ID")} lokasi dimuat`);
         setMapError(false);
-        setLoadMessage(
-          usableStations.length > 0
-            ? `${usableStations.length.toLocaleString("id-ID")} lokasi dimuat`
-            : "Belum ada lokasi berkoordinat di database"
-        );
+        window.setTimeout(() => map.invalidateSize(), 80);
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") return;
         console.error("Gagal memuat peta SPBU:", error);
         setMapError(true);
-        setLoadMessage("Peta gagal memuat data. Coba muat ulang halaman.");
+        setLoadMessage("Peta gagal memuat data. Gunakan tombol Refresh untuk mencoba lagi.");
       }
     }
 
-    void loadMapData();
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState === "visible") void loadMapData();
-    }, 15000);
-
+    void loadMapLocations();
     return () => {
-      window.clearInterval(intervalId);
       controller.abort();
       map.remove();
       mapRef.current = null;
@@ -235,35 +190,15 @@ export default function StationMap() {
         <div>
           <strong>Peta lokasi dari OpenStreetMap</strong>
           <p>
-            Cakupan lokasi dapat belum lengkap. Stok dan antrean berasal dari
-            laporan pengguna yang dapat berubah sewaktu-waktu; bukan konfirmasi
-            resmi Pertamina. ©{" "}
-            <a
-              href="https://www.openstreetmap.org/copyright"
-              target="_blank"
-              rel="noreferrer"
-            >
-              OpenStreetMap contributors
-            </a>
-            .
+            Cakupan lokasi dapat belum lengkap. Stok dan antrean berasal dari laporan pengguna yang dapat berubah sewaktu-waktu; bukan konfirmasi resmi Pertamina. ©{" "}
+            <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>.
           </p>
         </div>
       </div>
-
-      <div
-        ref={containerRef}
-        className="bbm-leaflet-map"
-        role="application"
-        aria-label="Peta lokasi SPBU di Indonesia"
-      />
-
+      <div ref={containerRef} className="bbm-leaflet-map" role="application" aria-label="Peta lokasi SPBU di Indonesia" />
       <div className="map-legend">
-        <span>
-          <i className="legend-demo" /> Lokasi dari OpenStreetMap · scroll mouse untuk zoom
-        </span>
-        <span>
-          {mapError ? "Gagal memuat" : loadMessage || `${stationCount} lokasi`}
-        </span>
+        <span><i className="legend-demo" /> Lokasi dari OpenStreetMap · scroll mouse untuk zoom</span>
+        <span>{mapError ? "Gagal memuat" : loadMessage || `${stationCount} lokasi`}</span>
       </div>
     </div>
   );

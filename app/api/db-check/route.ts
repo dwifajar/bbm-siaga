@@ -1,40 +1,25 @@
-
 import { NextResponse } from "next/server";
-import { getDatabase } from "@netlify/database";
+import { getBBMSiagaDB } from "../../lib/d1";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const db = getDatabase();
-
-    const rows = await db.sql<{
-      stations: number;
-      station_fuel_products: number;
-      fuel_reports: number;
-      app_settings: number;
-    }>`
-      SELECT
-        (SELECT COUNT(*)::int FROM public.stations) AS stations,
-        (SELECT COUNT(*)::int FROM public.station_fuel_products) AS station_fuel_products,
-        (SELECT COUNT(*)::int FROM public.fuel_reports) AS fuel_reports,
-        (SELECT COUNT(*)::int FROM public.app_settings) AS app_settings
-    `;
-
+    const db = getBBMSiagaDB();
+    const stationCount = await db.prepare("SELECT COUNT(*) AS count FROM stations")
+      .first<{ count: number }>();
+    const reportCount = await db.prepare("SELECT COUNT(*) AS count FROM fuel_reports")
+      .first<{ count: number }>();
     return NextResponse.json({
       success: true,
-      message: "Koneksi database berhasil.",
-      counts: rows[0],
+      message: "Koneksi Cloudflare D1 berhasil.",
+      counts: { stations: stationCount?.count ?? 0, fuel_reports: reportCount?.count ?? 0 },
     });
   } catch (error) {
-    console.error("BBM Siaga database check failed:", error);
-
+    console.error("BBM Siaga D1 check failed:", error);
     return NextResponse.json(
-      {
-        success: false,
-        message: "Pemeriksaan database gagal.",
-      },
+      { success: false, message: "Koneksi database gagal." },
       { status: 500 }
     );
   }
